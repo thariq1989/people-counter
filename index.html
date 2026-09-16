@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iPhone People Counter</title>
+  <!-- Load TensorFlow.js and COCO-SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 0; background: #111; color: white; }
+    #stats { position: relative; z-index: 10; padding: 12px; background: rgba(0,0,0,0.85); font-size: 20px; }
+    #status { font-size: 14px; color: #aaa; margin-top: 4px; }
+    #container { position: relative; display: inline-block; width: 100%; max-width: 640px; margin: 0 auto; }
+    video { width: 100%; height: auto; display: block; }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    #startBtn {
+      display: none;
+      margin: 20px auto;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      background: #00FF00;
+      color: #111;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="stats">
+    People Count: <span id="count">0</span>
+    <div id="status">Initializing camera & AI model...</div>
+  </div>
+
+  <button id="startBtn">Start Camera</button>
+
+  <div id="container">
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script>
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const countDisplay = document.getElementById('count');
+    const statusDisplay = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+
+    // 1. Setup Camera Access for Safari / Mobile / Desktop
+    async function setupCamera() {
+      statusDisplay.innerText = "Requesting camera access...";
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' }, // Back camera on phones, fallback if unavailable
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+        return new Promise(resolve => {
+          video.onloadedmetadata = () => {
+            video.play();
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            resolve(video);
+          };
+        });
+      } catch (err) {
+        statusDisplay.innerText = "Camera error: " + err.message + " (Ensure HTTPS or localhost)";
+        startBtn.style.display = "block";
+        throw err;
+      }
+    }
+
+    // 2. Detect and Count Humans
+    async function main() {
+      try {
+        await setupCamera();
+        statusDisplay.innerText = "Loading COCO-SSD detection model...";
+        const model = await cocoSsd.load(); // Loads lightweight detection model
+        statusDisplay.innerText = "Model loaded. Detecting people...";
+
+        detectFrame(video, model);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function detectFrame(video, model) {
+      if (video.readyState < 2) {
+        requestAnimationFrame(() => detectFrame(video, model));
+        return;
+      }
+
+      model.detect(video).then(predictions => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Filter predictions specifically for 'person'
+        const people = predictions.filter(p => p.class === 'person' && p.score > 0.5);
+        
+        // Update live counter
+        countDisplay.innerText = people.length;
+
+        // Draw bounding boxes around detected people
+        ctx.font = '18px sans-serif';
+        people.forEach(prediction => {
+          const [x, y, width, height] = prediction.bbox;
+          ctx.strokeStyle = '#00FF00';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(x, y, width, height);
+
+          // Draw label background
+          const label = `Person (${Math.round(prediction.score * 100)}%)`;
+          const textWidth = ctx.measureText(label).width;
+          ctx.fillStyle = '#00FF00';
+          ctx.fillRect(x, (y > 24 ? y - 24 : y), textWidth + 8, 22);
+
+          // Draw label text
+          ctx.fillStyle = '#000';
+          ctx.fillText(label, x + 4, (y > 24 ? y - 6 : y + 16));
+        });
+
+        requestAnimationFrame(() => detectFrame(video, model));
+      }).catch(err => {
+        console.error("Detection error:", err);
+        requestAnimationFrame(() => detectFrame(video, model));
+      });
+    }
+
+    startBtn.addEventListener('click', () => {
+      startBtn.style.display = "none";
+      main();
+    });
+
+    // Run automatically
+    main();
+  </script>
+</body>
+</html>
